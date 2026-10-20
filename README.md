@@ -1,8 +1,6 @@
-# Checkout Demo
+# Enterprise Checkout System
 
-A modern checkout demo built to showcase a clean, scalable, and maintainable e-commerce checkout architecture.
-
-> This project is intended for demonstration and development purposes. It does not process real payments unless a payment provider is properly configured.
+An enterprise-grade e-commerce checkout architecture built to showcase robust concurrency controls, distributed transactions, and idempotent payment pipelines.
 
 ## Features
 
