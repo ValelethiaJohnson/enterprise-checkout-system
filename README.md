@@ -340,7 +340,9 @@ Do not expose secret keys in frontend code or commit them to the repository.
 Clone the repository:
 
 ```bash
-git clone https://github.com/your-username/checkout-demo.git
+git clone https://github.com/ValelethiaJohnson/enterprise-checkout-system.git
+cd enterprise-checkout-system
+
 cd checkout-demo
 ```
 
