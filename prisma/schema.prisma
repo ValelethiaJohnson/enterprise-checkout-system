@@ -1,0 +1,29 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  customerId    String
+  status        OrderStatus @default(PENDING_PAYMENT)
+  totalAmount   Int         // Stored in smallest currency unit (cents)
+  currency      String      @default("USD")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_PAYMENT
+  PAID
+  PROCESSING
+  COMPLETED
+  PAYMENT_FAILED
+  CANCELLED
+  REFUNDED
+}
