@@ -367,32 +367,38 @@ Open the application:
 ```text
 http://localhost:3000
 ```
+## Security and Audit
 
-## Security Considerations
+- **Server-Side Authority:** Never trust prices, totals, or discounts calculated on the client side; always recalculate values in the pricing service.
+- **Database Transactions:** Wrap critical inventory checks and order creation inside strict database transactions with proper isolation levels.
+- **Webhook Verification:** Verify all incoming payment provider webhook signatures before mutating order or payment states.
+- **Data Minimization:** Never store raw credit card numbers or sensitive payment payloads in the application database.
+- **Audit Trails:** Record immutable audit logs for all state transitions, manual overrides, and refund operations.
 
-* Recalculate all prices on the server.
-* Never trust totals submitted by the frontend.
-* Validate and sanitize all customer input.
-* Use HTTPS in production.
-* Keep payment credentials on the server.
-* Verify payment webhook signatures.
-* Use idempotency keys for checkout requests.
-* Rate-limit sensitive endpoints.
-* Avoid storing raw card information.
-* Log important payment and order events.
-* Do not expose internal error details to customers.
+## Concurrency and Race Conditions
 
-## Idempotency
+To prevent overselling inventory and duplicate checkout submissions under high traffic, the system implements strict concurrency controls:
 
-Checkout requests should support idempotency to prevent duplicate orders or payments when a customer submits the form multiple times.
+- **Database-Level Pessimistic Locking:** When verifying inventory and creating a pending order, use row-level locking (`SELECT ... FOR UPDATE` via Prisma/PostgreSQL) to serialize operations on the same product variants.
+- **Distributed Locks:** Use Redis locks for checkout sessions to prevent a user from triggering parallel payment requests with the same payload.
+- **Idempotency Keys:** Enforce `Idempotency-Key` headers on `/api/checkout` to safely handle client retries and network timeouts without duplicating orders.
 
-Example header:
+## Distributed Transactions
 
-```http
-Idempotency-Key: checkout-session-123456
-```
+Because external payment gateway calls (Stripe) cannot be wrapped inside an internal PostgreSQL ACID transaction, the system handles distributed boundaries using a **Saga Pattern / Compensation Workflow**:
 
-The server should return the existing checkout result when the same key is submitted again.
+1. **Step 1:** Reserve inventory and create a pending order in the database.
+2. **Step 2:** Call the Payment Gateway adapter.
+3. **Step 3 (Success):** Deduct inventory permanently and mark the order as paid.
+4. **Step 4 (Failure / Timeout):** If the payment fails or times out, trigger an asynchronous compensation transaction via BullMQ to release the reserved inventory and cancel the order.
+
+## Payment Session Expiry & Cleanup
+
+Unpaid orders can lock inventory indefinitely if not handled. 
+
+- **Expiration Window:** Checkout sessions expire after 15 minutes of inactivity.
+- **Background Cron Worker:** A scheduled BullMQ delayed job continuously scans for orders stuck in `PENDING_PAYMENT` state past their threshold.
+- **Automatic Cleanup:** Expired orders automatically release reserved inventory back to stock and transition their status to `CANCELLED`.
 
 ## Webhook Handling
 
