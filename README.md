@@ -1,472 +1,141 @@
-# Enterprise Checkout System
+# Enterprise Checkout & Distributed Ledger System
 
-An enterprise-grade e-commerce checkout architecture built to showcase robust concurrency controls, distributed transactions, and idempotent payment pipelines.
+[![Enterprise CI Pipeline](https://github.com/ValelethiaJohnson/enterprise-checkout-system/actions/workflows/ci.yml/badge.svg)](https://github.com/ValelethiaJohnson/enterprise-checkout-system/actions)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6_Strict-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Prisma](https://img.shields.io/badge/ORM-Prisma_5-2D3748.svg?logo=prisma&logoColor=white)](https://www.prisma.io/)
+[![Stripe Connect](https://img.shields.io/badge/PSP-Stripe_Connect-635BFF.svg?logo=stripe&logoColor=white)](https://stripe.com/connect)
+[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL_Serializable-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
-## Features
+An enterprise-grade e-commerce checkout and financial ledger architecture designed for high-concurrency transaction processing, deterministic inventory reservation, and idempotent multi-party payment orchestration via **Stripe Connect**.
 
-* Customer information form
-* Shipping address management
-* Shipping method selection
-* Order summary
-* Discount code support
-* Multiple payment methods
-* Client-side and server-side validation
-* Mock payment processing
-* Payment success and failure pages
-* Responsive checkout interface
-* Order status management
+---
 
-## Technical Architecture
+## 1. Core Architectural Pillars
 
-The project separates the user interface, business logic, data access, and payment integration into independent layers.
+* **Multi-Layer Idempotency Enforcement:** Combines a fast-path Redis distributed lock (`SET ... NX EX`) with cryptographic SHA-256 request payload fingerprinting. Protects upstream payment gateways from network retries, client double-clicks, and concurrent race conditions while detecting payload tampering across replayed `Idempotency-Key` headers.
+* **Deadlock-Free Pessimistic Inventory Control:** Eliminates flash-sale overselling by sorting SKU lock acquisition deterministically in lexicographical order and executing row-level locking (`SELECT ... FOR UPDATE NOWAIT`) inside PostgreSQL `Serializable` transactions.
+* **Immutable Double-Entry Accounting Engine:** Replaces mutable balance columns with an append-only financial ledger (`ledger_entries`). Every checkout operation enforces a strict zero-sum invariant ($\sum \text{Debits} = \sum \text{Credits}$) across `CUSTOMER_CLEARING_RECEIVABLE`, `MERCHANT_ESCROW_PAYABLE`, and `PLATFORM_REVENUE_FEE` accounts, sealed with a SHA-256 audit trail hash.
+* **Two-Phase Stripe Connect Split Payments:** Orchestrates manual authorization holds (`capture_method: 'manual'`) with automated platform fee deduction (`250 bps` / `2.5%`) and destination escrow routing, decoupling database lock duration from external PSP network latency.
+* **Zero Floating-Point Drift (ISO 4217):** All monetary fields, fee calculations, and database columns operate exclusively in minor currency units (`BigInt` cents) to eradicate IEEE 754 floating-point rounding anomalies.
 
-```mermaid
-flowchart TD
-    Customer[Customer] --> UI[Checkout Interface]
-    UI --> Validation[Client Validation]
-    Validation --> API[Checkout API]
+---
 
-    API --> CheckoutService[Checkout Service]
-    CheckoutService --> PricingService[Pricing Service]
-    CheckoutService --> InventoryService[Inventory Service]
-    CheckoutService --> OrderService[Order Service]
-    CheckoutService --> PaymentAdapter[Payment Gateway Adapter]
-
-    PricingService --> Database[(Database)]
-    InventoryService --> Database
-    OrderService --> Database
-
-    PaymentAdapter --> Provider[Payment Provider]
-    Provider --> Webhook[Webhook Handler]
-    Webhook --> OrderService
-```
-
-## Architecture Layers
-
-### Presentation Layer
-
-The presentation layer displays the checkout interface and collects information from the customer.
-
-Its responsibilities include:
-
-* Rendering checkout steps
-* Collecting customer and shipping information
-* Displaying available payment methods
-* Showing the order summary
-* Performing basic form validation
-* Handling loading and error states
-* Redirecting customers after checkout
-
-The frontend must not be treated as a trusted source for product prices, discounts, shipping fees, or final totals.
-
-### API Layer
-
-The API layer acts as the communication point between the frontend and backend services.
-
-Its responsibilities include:
-
-* Validating incoming requests
-* Sanitizing customer input
-* Verifying the checkout session
-* Preventing duplicate submissions
-* Calling checkout services
-* Returning standardized responses
-* Handling errors securely
-
-Example endpoint:
-
-```http
-POST /api/checkout
-```
-
-Example request:
-
-```json
-{
-  "customer": {
-    "name": "Nguyen Van A",
-    "email": "customer@example.com",
-    "phone": "0900000000"
-  },
-  "shippingAddress": {
-    "address": "123 Main Street",
-    "city": "New York",
-    "country": "United States"
-  },
-  "shippingMethod": "standard",
-  "paymentMethod": "mock_card",
-  "couponCode": "WELCOME10",
-  "items": [
-    {
-      "productId": "product-001",
-      "quantity": 2
-    }
-  ]
-}
-```
-
-### Checkout Service
-
-The checkout service coordinates the full checkout process.
-
-Typical workflow:
-
-1. Validate the customer information.
-2. Validate cart items.
-3. Load current product prices.
-4. Check product availability.
-5. Validate the discount code.
-6. Calculate the final order total.
-7. Create a pending order.
-8. Initialize the payment.
-9. Return the checkout result.
-
-The checkout service should coordinate other services without containing provider-specific payment logic.
-
-### Pricing Service
-
-The pricing service calculates all trusted order values on the server.
-
-```text
-Subtotal
-+ Shipping fee
-+ Taxes
-- Discounts
-= Final total
-```
-
-Example:
-
-```json
-{
-  "currency": "USD",
-  "subtotal": 1000000,
-  "shippingFee": 30000,
-  "tax": 0,
-  "discount": 100000,
-  "total": 930000
-}
-```
-
-Money should be stored and calculated using integers in the smallest supported currency unit to avoid floating-point errors.
-
-### Inventory Service
-
-The inventory service verifies whether the requested products and quantities are available.
-
-Possible inventory workflow:
-
-* Check inventory before creating an order.
-* Reserve inventory when an order is pending.
-* Deduct inventory after successful payment.
-* Release reserved inventory when payment fails or expires.
-
-### Order Service
-
-The order service manages order creation and order status transitions.
-
-Example order statuses:
-
-```text
-DRAFT
-PENDING_PAYMENT
-PAID
-PROCESSING
-COMPLETED
-PAYMENT_FAILED
-CANCELLED
-REFUNDED
-```
-
-Payment status should be stored separately from order status.
-
-Example payment statuses:
-
-```text
-PENDING
-AUTHORIZED
-SUCCEEDED
-FAILED
-CANCELLED
-REFUNDED
-```
-
-### Payment Gateway Adapter
-
-Payment provider integrations should be isolated behind a common interface.
-
-```ts
-interface PaymentGateway {
-  createPayment(
-    input: CreatePaymentInput
-  ): Promise<PaymentResult>;
-
-  getPaymentStatus(
-    paymentId: string
-  ): Promise<PaymentStatus>;
-
-  refundPayment(
-    paymentId: string,
-    amount?: number
-  ): Promise<RefundResult>;
-}
-```
-
-Possible implementations:
-
-```text
-MockPaymentGateway
-StripePaymentGateway
-PayPalPaymentGateway
-BankTransferGateway
-```
-
-This architecture allows payment providers to be replaced without modifying the main checkout workflow.
-
-## Checkout Sequence
+## 2. Distributed Transaction & Concurrency Flow
 
 ```mermaid
 sequenceDiagram
-    participant Customer
-    participant Frontend
-    participant API
-    participant CheckoutService
-    participant OrderService
-    participant PaymentGateway
-    participant PaymentProvider
+    autonumber
+    participant Client as Client Application
+    participant Redis as Redis Idempotency Gate
+    participant Service as EnterpriseCheckoutService
+    participant PG as PostgreSQL (Serializable)
+    participant Stripe as Stripe Connect API
 
-    Customer->>Frontend: Submit checkout form
-    Frontend->>API: POST /api/checkout
-    API->>CheckoutService: Process checkout
-    CheckoutService->>CheckoutService: Validate cart and calculate total
-    CheckoutService->>OrderService: Create pending order
-    OrderService-->>CheckoutService: Return order
-    CheckoutService->>PaymentGateway: Create payment
-    PaymentGateway->>PaymentProvider: Initialize transaction
-    PaymentProvider-->>PaymentGateway: Return payment status
-    PaymentGateway-->>CheckoutService: Return payment result
-    CheckoutService-->>API: Return checkout response
-    API-->>Frontend: Order and payment result
-    Frontend-->>Customer: Show success or failure page
+    Client->>Redis: POST /v1/checkout (Header: Idempotency-Key)
+    Redis->>Redis: Verify SHA-256 Payload Hash & Acquire NX Lock (30s TTL)
+    alt Cached Idempotent Replay
+        Redis-->>Client: 200 OK (Status: IDEMPOTENT_REPLAY)
+    else New In-Flight Transaction
+        Redis->>Service: Forward Validated Request
+        Service->>PG: BEGIN TRANSACTION (ISOLATION LEVEL SERIALIZABLE)
+        Service->>PG: SELECT inventory_stocks FOR UPDATE NOWAIT (Sorted by SKU)
+        Service->>PG: Decrement available_qty & Increment reserved_qty
+        Service->>PG: INSERT Order (State: RESERVED_PENDING_PAYMENT)
+        Service->>PG: INSERT 3 Double-Entry Ledger Rows (Debit == Credit + SHA-256 Hash)
+        Service->>PG: COMMIT TRANSACTION
+        Service->>Stripe: paymentIntents.create (manual capture + application_fee_amount)
+        Stripe-->>Service: Return payment_intent_id & client_secret
+        Service->>Redis: Cache Sealed Response (24h TTL) & Release NX Lock
+        Service-->>Client: 201 Created (Status: AUTHORIZED_PENDING_CAPTURE)
+    end
 ```
 
-## Suggested Project Structure
+---
+
+## 3. Double-Entry Ledger Accounting Model
+
+Every order processed by `EnterpriseCheckoutService` generates an immutable, balanced set of accounting entries prior to upstream PSP invocation. For a **$100.00 USD** (`10000` cents) checkout with a **2.5%** (`250` cents) platform fee:
+
+| Account Type | Direction | Amount (Minor Units) | Purpose |
+| :--- | :---: | :---: | :--- |
+| `CUSTOMER_CLEARING_RECEIVABLE` | `DEBIT` | `10000` | Captures gross customer payment obligation |
+| `MERCHANT_ESCROW_PAYABLE` | `CREDIT` | `9750` | Net settlement liability owed to the connected merchant |
+| `PLATFORM_REVENUE_FEE` | `CREDIT` | `250` | Marketplace orchestration fee retained by the platform |
+
+> **Accounting Invariant:** $\sum \text{Debits} (10000) - \sum \text{Credits} (9750 + 250) = 0$. Rows in `ledger_entries` intentionally omit `updatedAt` timestamps and enforce `onDelete: Restrict` constraints at the database level.
+
+---
+
+## 4. Repository Structure
 
 ```text
-checkout-demo/
+enterprise-checkout-system/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                 # Automated build & manifest verification pipeline
+├── prisma/
+│   └── schema.prisma              # PostgreSQL schema (Order, LedgerEntry, InventoryStock, WebhookEventLog)
 ├── src/
-│   ├── app/
-│   │   ├── checkout/
-│   │   ├── checkout-success/
-│   │   ├── checkout-failed/
-│   │   └── api/
-│   │       ├── checkout/
-│   │       ├── orders/
-│   │       └── webhooks/
-│   ├── components/
-│   │   ├── checkout-form/
-│   │   ├── customer-form/
-│   │   ├── shipping-address/
-│   │   ├── shipping-methods/
-│   │   ├── payment-methods/
-│   │   └── order-summary/
 │   ├── services/
-│   │   ├── checkout.service.ts
-│   │   ├── pricing.service.ts
-│   │   ├── inventory.service.ts
-│   │   ├── order.service.ts
-│   │   └── payment.service.ts
-│   ├── payments/
-│   │   ├── payment-gateway.interface.ts
-│   │   ├── mock-payment.gateway.ts
-│   │   └── stripe-payment.gateway.ts
-│   ├── repositories/
-│   ├── validators/
-│   ├── types/
-│   └── utils/
-├── public/
-├── tests/
-├── .env.example
-├── package.json
-└── README.md
+│   │   └── checkout.service.ts    # Core idempotent checkout & ledger orchestration engine
+│   └── types/                     # Domain interfaces and strict type definitions
+├── .env.example                   # Enterprise environment configuration template
+├── .gitignore                     # Artifact and credential exclusion rules
+├── LICENSE                        # Apache-2.0 Open Source License
+├── package.json                   # Runtime dependencies & verification scripts
+└── tsconfig.json                  # Strict TypeScript compiler configuration
 ```
 
-## Example Checkout Response
+---
 
-Successful checkout:
+## 5. Engineering Decisions & Trade-offs (ADR Summary)
 
-```json
-{
-  "success": true,
-  "orderId": "order_123456",
-  "orderStatus": "PENDING_PAYMENT",
-  "paymentStatus": "PENDING",
-  "total": 930000,
-  "currency": "USD",
-  "redirectUrl": "/checkout-success?orderId=order_123456"
-}
-```
+1. **Why `FOR UPDATE NOWAIT` instead of Optimistic Concurrency Control (OCC)?**
+   During high-contention flash sales on hot SKUs, OCC (`version` column checks) triggers excessive retry storms and transaction aborts. Pessimistic locking with `NOWAIT` fails fast when contention exceeds threshold limits while deterministic SKU sorting (`a.skuId.localeCompare(b.skuId)`) mathematically prevents circular wait deadlocks.
+2. **Why decouple Stripe API calls from the Database Transaction?**
+   Executing external HTTP calls to Stripe inside an open PostgreSQL `Serializable` transaction holds row locks across unpredictable network I/O (200ms–2000ms), exhausting connection pools. We commit the `RESERVED_PENDING_PAYMENT` state and ledger entries locally first, then invoke Stripe Connect using a deterministic key (`stripe:pi:${idempotencyKey}`).
+3. **Why Strict TypeScript Compiler Flags?**
+   `noUncheckedIndexedAccess`, `strictNullChecks`, and `exactOptionalPropertyTypes` are enforced in `tsconfig.json` to guarantee compile-time safety when handling financial payloads and array bounds.
 
-Failed checkout:
+---
 
-```json
-{
-  "success": false,
-  "error": {
-    "code": "OUT_OF_STOCK",
-    "message": "One or more products are no longer available."
-  }
-}
-```
+## 6. Local Development & Verification
 
-## Environment Variables
+### Prerequisites
+* **Node.js** `>= 20.0.0 LTS`
+* **PostgreSQL** `>= 15`
+* **Redis** `>= 7.0`
 
-Create a `.env` file based on `.env.example`.
-
-```env
-DATABASE_URL=
-PAYMENT_PROVIDER=mock
-PAYMENT_SECRET_KEY=
-PAYMENT_WEBHOOK_SECRET=
-APP_URL=http://localhost:3000
-```
-
-Do not expose secret keys in frontend code or commit them to the repository.
-
-## Installation
-
-Clone the repository:
+### Setup & Execution
 
 ```bash
-git clone https://github.com/ValelethiaJohnson/enterprise-checkout-system.git
-cd enterprise-checkout-system
-
-cd checkout-demo
-```
-
-Install dependencies:
-
-```bash
+# 1. Install dependencies
 npm install
-```
 
-Create the environment file:
-
-```bash
+# 2. Configure environment variables
 cp .env.example .env
+
+# 3. Generate Prisma Client & deploy database schema
+npm run db:generate
+npm run db:migrate
+
+# 4. Run strict TypeScript type verification & test suite
+npm run typecheck
+npm test
 ```
 
-Start the development server:
+---
 
-```bash
-npm run dev
-```
+## 7. Security & Compliance
 
-Open the application:
+* **PCI-DSS Scope Reduction:** Raw Primary Account Numbers (PAN) and CVV data never touch this service; card tokenization is delegated directly to Stripe Elements / PaymentIntents (`client_secret`).
+* **Cryptographic Audit Trails:** Every ledger batch is stamped with a deterministic SHA-256 digest (`orderId:amountMinor:idempotencyKey`) indexed via `idx_ledger_entries_audit_hash` for continuous reconciliation.
 
-```text
-http://localhost:3000
-```
-## Security and Audit
-
-- **Server-Side Authority:** Never trust prices, totals, or discounts calculated on the client side; always recalculate values in the pricing service.
-- **Database Transactions:** Wrap critical inventory checks and order creation inside strict database transactions with proper isolation levels.
-- **Webhook Verification:** Verify all incoming payment provider webhook signatures before mutating order or payment states.
-- **Data Minimization:** Never store raw credit card numbers or sensitive payment payloads in the application database.
-- **Audit Trails:** Record immutable audit logs for all state transitions, manual overrides, and refund operations.
-
-## Concurrency and Race Conditions
-
-To prevent overselling inventory and duplicate checkout submissions under high traffic, the system implements strict concurrency controls:
-
-- **Database-Level Pessimistic Locking:** When verifying inventory and creating a pending order, use row-level locking (`SELECT ... FOR UPDATE` via Prisma/PostgreSQL) to serialize operations on the same product variants.
-- **Distributed Locks:** Use Redis locks for checkout sessions to prevent a user from triggering parallel payment requests with the same payload.
-- **Idempotency Keys:** Enforce `Idempotency-Key` headers on `/api/checkout` to safely handle client retries and network timeouts without duplicating orders.
-
-## Distributed Transactions
-
-Because external payment gateway calls (Stripe) cannot be wrapped inside an internal PostgreSQL ACID transaction, the system handles distributed boundaries using a **Saga Pattern / Compensation Workflow**:
-
-1. **Step 1:** Reserve inventory and create a pending order in the database.
-2. **Step 2:** Call the Payment Gateway adapter.
-3. **Step 3 (Success):** Deduct inventory permanently and mark the order as paid.
-4. **Step 4 (Failure / Timeout):** If the payment fails or times out, trigger an asynchronous compensation transaction via BullMQ to release the reserved inventory and cancel the order.
-
-## Payment Session Expiry & Cleanup
-
-Unpaid orders can lock inventory indefinitely if not handled. 
-
-- **Expiration Window:** Checkout sessions expire after 15 minutes of inactivity.
-- **Background Cron Worker:** A scheduled BullMQ delayed job continuously scans for orders stuck in `PENDING_PAYMENT` state past their threshold.
-- **Automatic Cleanup:** Expired orders automatically release reserved inventory back to stock and transition their status to `CANCELLED`.
-
-## Webhook Handling
-
-The payment provider webhook should be treated as the trusted source for asynchronous payment updates.
-
-Example endpoint:
-
-```http
-POST /api/webhooks/payment
-```
-
-Recommended webhook workflow:
-
-1. Receive the payment event.
-2. Verify the webhook signature.
-3. Check whether the event has already been processed.
-4. Update the payment status.
-5. Update the related order status.
-6. Record the event for auditing.
-7. Return a successful HTTP response.
-
-## Testing
-
-Run unit tests:
-
-```bash
-npm run test
-```
-
-Run integration tests:
-
-```bash
-npm run test:integration
-```
-
-Run end-to-end tests:
-
-```bash
-npm run test:e2e
-```
-
-Important scenarios to test:
-
-* Successful checkout
-* Invalid customer information
-* Invalid discount code
-* Out-of-stock product
-* Price change during checkout
-* Failed payment
-* Duplicate submission
-* Expired payment session
-* Invalid webhook signature
-* Successful refund
-
-## Future Improvements
-
-* Add guest and authenticated checkout
-* Add saved addresses
-* Add multiple currencies
-* Add tax calculation
-* Add real payment providers
-* Add abandoned checkout recovery
-* Add fraud detection
-* Add order confirmation emails
-* Add payment retry support
-* Add an administration dashboard
-* Add analytics and checkout conversion tracking
+---
 
 ## License
 
-This project is available under the MIT License.
+Licensed under the **Apache License, Version 2.0**. See [LICENSE](./LICENSE) for full details.
+
+**Architected & Maintained by [Valelethia Johnson](https://github.com/ValelethiaJohnson)** — *Principal FinTech & Payment Systems Architect*.
