@@ -1,29 +1,132 @@
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+// ============================================================================
+// Enterprise Checkout & Immutable Ledger Schema
+// Architecture: Principal FinTech & Payment Systems
+// Standards: ISO 4217 Minor Units (BigInt), Double-Entry Bookkeeping, ACID Locking
+// ============================================================================
 
 generator client {
   provider = "prisma-client-js"
 }
 
-model Order {
-  id            String      @id @default(uuid())
-  customerId    String
-  status        OrderStatus @default(PENDING_PAYMENT)
-  totalAmount   Int         // Stored in smallest currency unit (cents)
-  currency      String      @default("USD")
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-enum OrderStatus {
-  DRAFT
-  PENDING_PAYMENT
-  PAID
-  PROCESSING
-  COMPLETED
-  PAYMENT_FAILED
-  CANCELLED
+// ----------------------------------------------------------------------------
+// ENUMS: Deterministic Lifecycle & Financial Accounting
+// ----------------------------------------------------------------------------
+
+enum OrderState {
+  RESERVED_PENDING_PAYMENT
+  AUTHORIZED
+  CAPTURED
+  SETTLED
   REFUNDED
+  REVERSED
+  FAILED
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum LedgerAccountType {
+  CUSTOMER_CLEARING_RECEIVABLE
+  MERCHANT_ESCROW_PAYABLE
+  PLATFORM_REVENUE_FEE
+  REFUND_RESERVE_CONTRA
+}
+
+enum WebhookProcessingStatus {
+  PENDING
+  PROCESSED
+  IGNORED_OUT_OF_ORDER
+  FAILED_DLQ
+}
+
+// ----------------------------------------------------------------------------
+// 1. HIGH-CONCURRENCY INVENTORY MODEL (Pessimistic Locking Target)
+// Matches raw SQL `SELECT ... FROM inventory_stocks FOR UPDATE NOWAIT`
+// ----------------------------------------------------------------------------
+
+model InventoryStock {
+  id           String   @id @default(uuid()) @db.Uuid
+  skuId        String   @unique @map("sku_id") @db.VarChar(64)
+  availableQty Int      @map("available_qty")
+  reservedQty  Int      @default(0) @map("reserved_qty")
+  version      Int      @default(1)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([skuId], name: "idx_inventory_stocks_sku_lock")
+  @@map("inventory_stocks")
+}
+
+// ----------------------------------------------------------------------------
+// 2. ORDER STATE MACHINE MODEL
+// Matches `tx.order.create` in EnterpriseCheckoutService
+// ----------------------------------------------------------------------------
+
+model Order {
+  id                String        @id @default(uuid()) @db.Uuid
+  customerId        String        @map("customer_id") @db.VarChar(128)
+  merchantAccountId String        @map("merchant_account_id") @db.VarChar(128)
+  currency          String        @db.Char(3)
+  totalAmountMinor  BigInt        @map("total_amount_minor")
+  platformFeeMinor  BigInt        @map("platform_fee_minor")
+  state             OrderState    @default(RESERVED_PENDING_PAYMENT)
+  idempotencyKey    String        @unique @map("idempotency_key") @db.VarChar(255)
+  paymentIntentId   String?       @unique @map("payment_intent_id") @db.VarChar(128)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ledgerEntries     LedgerEntry[]
+
+  @@index([customerId, createdAt(sort: Desc)], name: "idx_orders_customer_timeline")
+  @@index([merchantAccountId, state], name: "idx_orders_merchant_settlement")
+  @@map("orders")
+}
+
+// ----------------------------------------------------------------------------
+// 3. APPEND-ONLY DOUBLE-ENTRY IMMUTABLE LEDGER
+// Matches `tx.ledgerEntry.createMany` in EnterpriseCheckoutService
+// Note: Intentionally omits `updatedAt` to enforce append-only immutability.
+// ----------------------------------------------------------------------------
+
+model LedgerEntry {
+  id                String            @id @default(uuid()) @db.Uuid
+  orderId           String            @map("order_id") @db.Uuid
+  accountType       LedgerAccountType @map("account_type")
+  direction         LedgerDirection
+  amountMinor       BigInt            @map("amount_minor")
+  currency          String            @db.Char(3)
+  cryptographicHash String            @map("cryptographic_hash") @db.Char(64)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order             Order             @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId], name: "idx_ledger_entries_order_id")
+  @@index([cryptographicHash], name: "idx_ledger_entries_audit_hash")
+  @@index([accountType, createdAt], name: "idx_ledger_entries_reconciliation")
+  @@map("ledger_entries")
+}
+
+// ----------------------------------------------------------------------------
+// 4. STRIPE CONNECT WEBHOOK DEDUPLICATION & AUDIT LOG
+// Ensures idempotent processing of asynchronous PSP lifecycle events
+// ----------------------------------------------------------------------------
+
+model WebhookEventLog {
+  id              String                  @id @default(uuid()) @db.Uuid
+  stripeEventId   String                  @unique @map("stripe_event_id") @db.VarChar(128)
+  eventType       String                  @map("event_type") @db.VarChar(128)
+  payloadHash     String                  @map("payload_hash") @db.Char(64)
+  status          WebhookProcessingStatus @default(PENDING)
+  processedAt     DateTime?               @map("processed_at") @db.Timestamptz(6)
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([eventType, status], name: "idx_webhook_events_status")
+  @@map("webhook_event_logs")
 }
