@@ -1,0 +1,29 @@
+name: Enterprise Security & Vulnerability Audit
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 0 * * 1' # Every Monday
+
+jobs:
+  audit:
+    name: Node Vulnerability & Dependency Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run npm audit for High/Critical Vulnerabilities
+        run: |
+          if [ -f package.json ]; then
+            npm audit --audit-level=high || true
+          fi
