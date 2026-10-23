@@ -23,3 +23,10 @@ sequenceDiagram
         DB-->>API: Ledger Verified & Saved
         API->>Client: 201 Created (Transaction Successful)
     end
+---
+
+## 💖 Sponsor This Project
+
+If you find this enterprise-grade FinTech architecture valuable, consider supporting the development and maintenance of high-concurrency open-source financial systems.
+
+[![Sponsor Enterprise Checkout System](https://img.shields.io/badge/Sponsor-%F0%9F%92%96%20GitHub%20Sponsors-pink?style=for-the-badge)](https://github.com/sponsors/ValelethiaJohnson)
