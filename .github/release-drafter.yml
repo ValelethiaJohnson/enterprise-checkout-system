@@ -1,5 +1,8 @@
 name-template: 'v$RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
+template: |
+  ## 🚀 What's Changed
+  $CHANGES
 categories:
   - title: '🚀 Features'
     labels:
@@ -11,9 +14,6 @@ categories:
   - title: '📚 Documentation'
     labels:
       - 'documentation'
-change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
-exclude-labels:
-  - 'skip-changelog'
 version-resolver:
   major:
     labels:
