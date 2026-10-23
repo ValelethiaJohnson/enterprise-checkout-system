@@ -11,11 +11,17 @@ categories:
   - title: '📚 Documentation'
     labels:
       - 'documentation'
+change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
+exclude-labels:
+  - 'skip-changelog'
 version-resolver:
   major:
-    - label: 'major'
+    labels:
+      - 'major'
   minor:
-    - label: 'minor'
+    labels:
+      - 'minor'
   patch:
-    - label: 'patch'
-  default: 'patch'
+    labels:
+      - 'patch'
+  default: patch
