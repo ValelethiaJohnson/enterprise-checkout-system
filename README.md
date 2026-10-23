@@ -1,3 +1,7 @@
+# Enterprise Checkout & Distributed Ledger System
+
+An enterprise-grade e-commerce checkout and financial ledger architecture designed for high-concurrency transaction processing, deterministic inventory reservation, and idempotent multi-party payment orchestration via Stripe Connect[span_0](start_span)[span_0](end_span).
+
 ## 📊 Enterprise Checkout & Distributed Ledger Flow
 
 ```mermaid
@@ -13,7 +17,7 @@ sequenceDiagram
     Client->>API: POST /api/v1/checkout (HMAC-SHA256 Signed)
     API->>Idempotency: Check Request Hash & TTL Cache
     alt Duplicate Request
-        Idempotency--return: Return Cached Transaction Response
+        Idempotency-->>API: Return Cached Transaction Response
     else New Request
         API->>DB: Acquire Pessimistic Row Lock & Reserve Inventory
         DB-->>API: Inventory Reserved Successfully
@@ -23,10 +27,3 @@ sequenceDiagram
         DB-->>API: Ledger Verified & Saved
         API->>Client: 201 Created (Transaction Successful)
     end
----
-
-## 💖 Sponsor This Project
-
-If you find this enterprise-grade FinTech architecture valuable, consider supporting the development and maintenance of high-concurrency open-source financial systems.
-
-[![Sponsor Enterprise Checkout System](https://img.shields.io/badge/Sponsor-%F0%9F%92%96%20GitHub%20Sponsors-pink?style=for-the-badge)](https://github.com/sponsors/ValelethiaJohnson)
