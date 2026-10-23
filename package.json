@@ -34,7 +34,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
-    "dotenv": "^16.4.5",
+    "dotenv": "^18.0.8",
     "fastify": "^4.28.1",
     "ioredis": "^5.4.1",
     "pino": "^9.4.0",
