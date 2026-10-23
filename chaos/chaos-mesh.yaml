@@ -1,0 +1,16 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: payment-db-latency-injection
+  namespace: enterprise-checkout
+spec:
+  action: delay
+  mode: one
+  selector:
+    namespaces:
+      - enterprise-checkout
+  delay:
+    latency: '250ms'
+    jitter: '50ms'
+  duration: '30s'
+  direction: to
