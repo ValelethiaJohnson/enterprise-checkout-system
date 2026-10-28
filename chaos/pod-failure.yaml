@@ -1,0 +1,15 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: checkout-worker-pod-kill
+  namespace: enterprise-checkout
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - enterprise-checkout
+    labelSelectors:
+      app: enterprise-checkout-engine
+  scheduler:
+    cron: '@every 30m'
