@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: enterprise-checkout-engine
+  namespace: enterprise-checkout
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: enterprise-checkout-engine
+  template:
+    metadata:
+      labels:
+        app: enterprise-checkout-engine
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: checkout-api
+          image: ghcr.io/valelethiajohnson/enterprise-checkout-system:latest
+          ports:
+            - containerPort: 4000
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
