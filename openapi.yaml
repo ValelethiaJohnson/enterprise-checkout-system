@@ -1,0 +1,29 @@
+openapi: 3.1.0
+info:
+  title: Enterprise Checkout & Distributed Ledger API
+  version: 1.1.0
+  description: Mission-critical payment orchestration and double-entry ledger API.
+paths:
+  /api/v1/checkout:
+    post:
+      summary: Execute Idempotent Checkout & Inventory Reservation
+      operationId: executeCheckout
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Signature-HMAC-SHA256
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Transaction authorized and double-entry ledger posted.
+        '409':
+          description: Concurrent idempotency key lock conflict or mutated payload.
+        '422':
+          description: Insufficient inventory or zero-sum ledger invariant violation.
