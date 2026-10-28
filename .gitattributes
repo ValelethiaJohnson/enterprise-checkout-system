@@ -1,0 +1,8 @@
+# Enforce deterministic LF line endings across all financial source files
+* text=auto eol=lf
+
+# Instruct GitHub Linguist to measure 100% pure TypeScript architecture
+*.js linguist-vendored
+load-tests/** linguist-vendored
+Dockerfile linguist-vendored
+Makefile linguist-vendored
